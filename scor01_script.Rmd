@@ -1,0 +1,808 @@
+---
+title: "scor_01"
+author: "NN"
+date: "2023-01-02"
+output: html_document
+---
+
+```{r setup}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#load("E:\\workdata\\707957\\ID-NN\\Results\\Data\\scor.Rdata")
+library(tidyverse)
+library(psych)
+library(lattice)
+library(LMMstar)
+library(readxl)
+library(gtsummary)
+library(ggplot2)
+library(knitr)
+library(writexl)
+
+#setwd("E:/workdata/707957/ID-NN/Results/Til hjemsendelse/Final")
+```
+Calculating average number of entries per individual
+```{r}
+
+n_entries_per_individual <- plyr::count(scor$pnr)
+n_entries_per_individual <- rename(n_entries_per_individual, pnr = x)
+scor <- left_join(scor, n_entries_per_individual, by="pnr", all=T)
+scor <- rename(scor, n_entries_per_individual = freq)
+
+rm(n_entries_per_individual)
+````
+
+## Smaller dataframe for working on this project
+```{r}
+df <- scor %>% 
+  select(pnr,
+         statusdato, 
+         indberetningsaar,
+         perio,
+         gingivitis,
+         dmfs_perm,
+         dmfs_temp, dmfs,
+         ageatexam,
+         birth_year,
+         visit_year,
+         koen,
+         n_entries_per_individual)
+
+
+```
+
+#Finding mean(sd) number of entries per individual by birth cohorts 
+
+```{r}
+
+#Creating temporary scor variable with only one entry per individual
+temp <- df%>%
+  group_by(pnr) %>%
+  slice_head()
+
+describeBy(temp$n_entries_per_individual)
+
+## Calculating mean(sd) by birth cohort
+temp <- describeBy(temp$n_entries_per_individual, group = temp$birth_year)
+temp <- do.call("rbind", temp) %>% 
+  tibble::rownames_to_column() %>% 
+  rename(birth_year = rowname) %>% 
+  filter(birth_year >=1965 & birth_year <= 2010)
+
+temp$birth_year <- as.numeric(temp$birth_year)
+
+##plotting it
+  ggplot(temp, aes(x = birth_year,
+                 y = mean)) +
+      geom_errorbar(aes(ymin = mean - sd,
+                        ymax = mean+sd))+
+                      geom_point() +
+    xlab("Year of birth")+ ylab("Mean (sd)")+
+    theme_classic()+
+    scale_x_continuous(breaks = seq(1965, 2015, 5))
+    ggsave("mean_sd_entries_by_birth_year.png")
+    
+rm(temp)
+```
+
+## Calculating number of visits by age group
+```{r}
+options(scipen = 999)
+
+visits_df <- df %>%
+  count(pnr, ageatexam) %>%
+  mutate(age_groups = cut(ageatexam, breaks = c(0, 6, 11, 14, 19))) %>%
+  pivot_wider(names_from = age_groups,
+              values_from = n,
+              names_prefix = "visit_at_") %>%
+  select(!c(visit_at_NA)) %>%
+  group_by(pnr) %>%
+  summarise(across(starts_with("visit_at_"), sum, na.rm = TRUE)) %>%
+  ungroup 
+
+visits_df[apply(visits_df, 1, function(row) all(row !=0)), ] #Removing all rows with zero in, left with a total♣of 1.321.561 rows
+
+#This means that only 100/3.510.760*1.321.561 = % of all individuals have a full set of registrations
+
+#How many has three or more registrations?
+visits_df$`visit_at_(0,6]`[visits_df$`visit_at_(0,6]` > 0] <- 1
+visits_df$`visit_at_(6,11]`[visits_df$`visit_at_(6,11]` > 0] <- 1
+visits_df$`visit_at_(11,14]`[visits_df$`visit_at_(11,14]` > 0] <- 1
+visits_df$`visit_at_(14,19]`[visits_df$`visit_at_(14,19]` > 0] <- 1
+
+sum_visits <- visits_df %>% 
+  count(`visit_at_(0,6]`,`visit_at_(6,11]`, `visit_at_(11,14]`, `visit_at_(14,19]`)
+
+sum_visits <- sum_visits %>% 
+  mutate(percent_n = n/sum(n)*100)  
+
+#Getting proportion visits by birth year
+
+temp <- left_join(temp, visits_df, by ="pnr")
+
+temp %>% 
+  select(birth_year,
+         `visit_at_(0,6]`,
+         `visit_at_(6,11]`,
+         `visit_at_(11,14]`,
+         `visit_at_(14,19]`) %>%
+  tbl_summary(
+    by = birth_year) %>% 
+  add_overall()
+
+rm(temp, visits_df)
+```
+###Creating variable with only one entry per individual per age (0 to 18)
+#note less than 10% loss of information doing this (apx. 8% to be specific, 27.144.696 entries vs. 24.988.782)
+```{r}
+
+restricted.df <- df %>% 
+  group_by(pnr, ageatexam) %>%
+  slice_head()
+
+```
+## Calculating average number of entries per individual for restricted data
+```{r}
+
+n_entries_per_individual <- plyr::count(restricted.df$pnr)
+n_entries_per_individual <- rename(n_entries_per_individual, pnr = x)
+restricted.df <- left_join(restricted.df, n_entries_per_individual, by="pnr", all=T)
+restricted.df <- rename(restricted.df, n_entries_per_individual = freq)
+
+
+#Creating df with only one entry per individual
+temp <- restricted.df %>%
+  group_by(pnr) %>%
+  slice_head()
+
+## Calculating mean(sd) by birth cohort
+describeBy(temp$n_entries_per_individual)
+
+## Calculating mean(sd) by birth cohort
+temp <- describeBy(temp$n_entries_per_individual, group = temp$birth_year)
+temp <- do.call("rbind", temp) %>% 
+  tibble::rownames_to_column() %>% 
+  rename(birth_year = rowname) %>% 
+  filter(birth_year >=1965 & birth_year <= 2010)
+
+temp$birth_year <- as.numeric(temp$birth_year)
+
+##plotting it
+  ggplot(temp, aes(x = birth_year,
+                 y = mean)) +
+      geom_errorbar(aes(ymin = mean - sd,
+                        ymax = mean+sd))+
+                      geom_point() +
+       xlab("Year of birth")+ ylab("Mean (sd)")+
+       theme_classic()+
+    scale_x_continuous(breaks = seq(1965, 2010, 5))
+    ggsave("mean_sd_entries_by_birth_year_restricted.png")
+
+
+```
+
+## Entries by age and year of report/birth/visit using restricted.df, i.e. how many individuals have at least one visit at a given age.
+```{r}
+#Number of visits by year of report and age
+ind.age <- data.frame(unclass(table(restricted.df$indberetningsaar, restricted.df$ageatexam)))
+ind.age[ind.age <= 5] <- 0
+write_xlsx(ind.age, "E:\\workdata\\707957\\ID-NN\\Results\\Til hjemsendelse\\regyear_ageatexam.xlsx")
+    
+#Number of visits by year of birth and age
+birth.age <-data.frame(unclass(table(restricted.df$birth_year, restricted.df$ageatexam)))
+birth.age[birth.age <= 5] <- 0
+  write_xlsx(birth.age, "E:\\workdata\\707957\\ID-NN\\Results\\Til hjemsendelse\\birthyear_ageatexam.xlsx")
+  
+#Number of visits by year of visit and age
+visit.age <-data.frame(unclass(table(restricted.df$visit_year, restricted.df$ageatexam)))
+visit.age[visit.age <= 5] <- 0
+  write_xlsx(visit.age, "E:\\workdata\\707957\\ID-NN\\Results\\Til hjemsendelse\\visityear_ageatexam.xlsx")
+
+#Number of visits by age
+  age.res <-data.frame(table(restricted.df$ageatexam)) %>% 
+  write_xlsx("E:\\workdata\\707957\\ID-NN\\Results\\Til hjemsendelse\\age_res.xlsx")
+  
+#Number of individuals with a visit by age
+  age_total <- data.frame(table(df$ageatexam)) %>% 
+  write_xlsx("E:\\workdata\\707957\\ID-NN\\Results\\Til hjemsendelse\\age_total.xlsx")
+
+  rm(birth.age, ind.age, visit.age)
+```  
+  ##Plotting number of visits per year of report by age (actual enrollment into SCOR)
+```{r}
+ ##Plotting number of visits per year of report by age
+ind.age <- data.frame(table(restricted.df$indberetningsaar, restricted.df$ageatexam)) %>% 
+  rename(., Age = Var2)
+ind.age[ind.age <= 5] <- 0
+ind.age$Var1 <- as.character(ind.age$Var1)
+ind.age$Var1 <- as.numeric(ind.age$Var1)
+
+#Plotting it
+ggplot(ind.age, aes(fill=Age, y = Freq, x = Var1))+
+  geom_bar(position = "stack", stat = "identity")+
+   xlab("Year of report")+ ylab("Frequency")+
+      theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2021, 5))
+ggsave("registrations_actual.png")
+
+rm(ind.age)
+```
+```
+##Plots of registrations by
+```{r}
+options(scipen = 999)
+
+#Entries per individual total and restricted dataset:
+age.res$Dataset[age.res$Freq > 0] <- "Restricted"
+age_total$Dataset[age_total$Freq > 0] <- "Total"
+age.df <- rbind(age.res, age_total) 
+age.df$Dataset <- as.factor(age.df$Dataset)
+
+#plotting it
+age_full_res <- ggplot()+
+    geom_line(data = age.df, aes(x=Var1, y=Freq, group = Dataset, color = Dataset))+
+     xlab("Age")+ ylab("Number of visits")+
+    theme_classic()
+ggsave("Age.png")
+
+
+#By Age before/after 1993
+
+year_of_report <- data.frame(table(restricted.df$indberetningsaar, restricted.df$ageatexam))
+
+year_of_report$Var1 <- as.character(year_of_report$Var1)
+year_of_report$Var1 <- as.numeric(year_of_report$Var1)
+
+year_of_report$Var2 <- as.character(year_of_report$Var2)
+year_of_report$Var2 <- as.numeric(year_of_report$Var2)
+
+year_of_report_pre <- year_of_report %>% 
+  filter(Var1 < 1993) %>% 
+  group_by(Var2) %>% 
+  mutate(., visits = sum(Freq)) %>% 
+  slice_head() %>% 
+  mutate(., percent =(100/14029961*visits)) %>% 
+  mutate(., group = "Before 1993")
+
+year_of_report_post <- year_of_report %>% 
+  filter(Var1 >= 1993) %>% 
+  group_by(Var2) %>% 
+  mutate(., visits = sum(Freq)) %>%
+  slice_head() %>% 
+  mutate(., percent =(100/14029961*visits)) %>% 
+  mutate(., group = "After 1993")
+
+pre_post <- rbind(year_of_report_pre, year_of_report_post)
+pre_post$group <- as.factor(pre_post$group)
+
+age_1993 <- ggplot()+
+  geom_line(data = pre_post, aes(Var2, percent, group = group, color = group))+
+  labs(x = "Age", y = "Percent of visits", color = "Period")+
+ theme_classic()+
+    scale_x_continuous(breaks = seq(0, 18, 1))
+ggsave("age_1993.png")
+
+#Bind with restricted/full data entries
+
+setwd("E:/workdata/707957/ID-NN/Results/Scripts")
+
+ggarrange(age_full_res, age_1993)
+ggsave("age_plots.png")
+
+rm(year_of_report, year_of_report_pre, year_of_report_post, age_1993, age.df, age_total, age.res)
+
+````
+#Plot visits by
+```{r}
+
+#Birth year
+birth_year <- data.frame(table(restricted.df$birth_year))
+birth_year[birth_year <= 5] <- 0
+
+birth_year$Var1 <- as.character(birth_year$Var1)
+birth_year$Var1 <- as.numeric(birth_year$Var1)
+
+ggplot(data = birth_year, aes(x=Var1, y=Freq))+
+    geom_bar(stat = "identity")+
+  xlab("Year of birth")+ ylab("Frequency")+
+    theme_classic()+
+    scale_x_continuous(breaks = seq(1954, 2010, 5))
+ggsave("birth_year.png")
+
+#Year of report
+year_of_report <- data.frame(table(restricted.df$indberetningsaar))
+
+year_of_report$Var1 <- as.character(year_of_report$Var1)
+year_of_report$Var1 <- as.numeric(year_of_report$Var1)
+
+ggplot(data = year_of_report, aes(x=Var1, y=Freq, group = 1))+
+    geom_line()+
+   xlab("Year of report")+ ylab("Frequency")+
+      theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2021, 5))
+ggsave("year_of_report.png")
+
+#Year of visit
+
+year_of_visit <- data.frame(table(restricted.df$visit_year))
+
+year_of_visit$Var1 <- as.character(year_of_visit$Var1)
+year_of_visit$Var1 <- as.numeric(year_of_visit$Var1)
+
+ggplot(data = year_of_visit, aes(x=Var1, y=Freq, group = 1))+
+    geom_line()+
+   xlab("Year of visit")+ ylab("Frequency")+
+      theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2021, 5))
+ggsave("year_of_visit.png")
+
+rm(year_of_report, birth_year, year_of_visit, age.df, age, age_total)
+```
+##Plot gingivitis incidence rate by sex over time
+```{r}
+##Coding variable with first entry per individual with gingivitis otherwise just first entry.
+df1 <- df %>% 
+  group_by(pnr) %>% 
+  slice(which.max(gingivitis))
+
+#Making incidence plots
+tmp_overall <- df1 %>% 
+    group_by(indberetningsaar) %>% 
+    summarise(cases_inc = sum(gingivitis),
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000*cases_inc/population) %>% 
+    filter(cases_inc >=5 & indberetningsaar <2010)
+
+tmp_sex <- df1 %>% 
+    group_by(indberetningsaar, koen) %>% 
+    summarise(cases_inc = sum(gingivitis), 
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000 * cases_inc / population) %>% 
+    filter(cases_inc >=5 & indberetningsaar <2010)
+
+gingi.inci <- ggplot()+
+    geom_line(data = tmp_overall, aes(indberetningsaar, Incidens)) +
+    geom_line(data = tmp_sex, aes(indberetningsaar, Incidens, color = koen))+
+     labs(x = "Year of report", y = "Incidence", color = "Sex")+
+     theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2010, 5))
+ggsave("Gingi_inci.png")
+```
+#Gingi prevalence by age
+```{r}
+
+gingi_filter <- restricted.df %>% 
+  filter(ageatexam == 5 | ageatexam == 9 | ageatexam == 15)
+
+gingi_filter$ageatexam <- as.factor(gingi_filter$ageatexam)
+
+#Making prevalence plot
+
+tmp_age <- gingi_filter %>% 
+    group_by(indberetningsaar, ageatexam) %>% 
+    summarise(cases_inc = sum(gingivitis), 
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000 * cases_inc / population) %>% 
+    filter(indberetningsaar <2010)
+
+
+gingi.prev <- ggplot(data = tmp_age, aes(indberetningsaar, Incidens, color = ageatexam))+
+    geom_line()+
+     labs(x = "Year of report", y = "Prevalence", color = "Age")+
+     theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2010, 5))
+ggsave("Gingi_prev.png")
+
+rm(gingi_filter)
+```
+#Plotting perio incidence over time
+```{r}
+##Coding variable with first entry per individual with gingivitis otherwise just first entry.
+df2 <- df %>% 
+  group_by(pnr) %>% 
+  slice(which.max(perio))
+
+tmp_overall <- df2 %>% 
+    group_by(indberetningsaar) %>% 
+    summarise(cases_inc = sum(perio),
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000*cases_inc/population) %>% 
+    filter(cases_inc >=5 & indberetningsaar <2010)
+
+tmp_sex <- df2 %>% 
+    group_by(indberetningsaar, koen) %>% 
+    summarise(cases_inc = sum(perio), 
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000 * cases_inc / population) %>% 
+    filter(cases_inc >=5 & indberetningsaar <2010)
+
+inci.perio <- ggplot()+
+    geom_line(data = tmp_overall, aes(indberetningsaar, Incidens)) +
+    geom_line(data = tmp_sex, aes(indberetningsaar, Incidens, color = koen))+
+    labs(x = "Year of report", y = "Incidence", color = "Sex")+
+    theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2010, 5))
+ggsave("Perio_inci.png")
+```
+#Perio prevalence by age
+```{r}
+
+perio_filter <- restricted.df %>% 
+  filter(ageatexam == 5 | ageatexam == 9 | ageatexam == 15)
+
+perio_filter$ageatexam <- as.factor(perio_filter$ageatexam)
+
+#Making prevalence plot
+
+tmp_age <- perio_filter %>% 
+    group_by(indberetningsaar, ageatexam) %>% 
+    summarise(cases_inc = sum(perio), 
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000 * cases_inc / population) %>% 
+    filter(indberetningsaar <2010)
+
+
+prev.perio <- ggplot(data = tmp_age, aes(indberetningsaar, Incidens, color = ageatexam))+
+    geom_line()+
+     labs(x = "Year of report", y = "Prevalence", color = "Age")+
+     theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2010, 5))
+ggsave("Perio_prev_age.png")
+
+rm(perio_filter)
+```
+# By sex: Prevalence plot dmf_s/DMF_S (Summed together) - number of individuals with 1 or more surfaces registered as destroyed, misssing or filled.
+```{r}
+#Coding binary dmfs variable to allow plotting
+restricted.df$dmfs_bi <- ifelse(restricted.df$dmfs > 0, 1, 0)
+
+##Coding variable with first entry per individual with gingivitis otherwise just first entry.
+df3 <- restricted.df %>% 
+  group_by(pnr) %>% 
+  slice(which.max(dmfs_bi))
+
+tmp_overall <- df3 %>% 
+    group_by(indberetningsaar) %>% 
+    summarise(cases_inc = sum(dmfs_bi),
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000*cases_inc/population) %>% 
+    filter(cases_inc >=5 & indberetningsaar <2010)
+
+tmp_sex <- df3 %>% 
+    group_by(indberetningsaar, koen) %>% 
+    summarise(cases_inc = sum(dmfs_bi), 
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000 * cases_inc / population) %>% 
+    filter(cases_inc >=5 & indberetningsaar <2010)
+
+inci.caries <- ggplot()+
+    geom_line(data = tmp_overall, aes(indberetningsaar, Incidens)) +
+    geom_line(data = tmp_sex, aes(indberetningsaar, Incidens, color = koen))+
+    labs(x = "Year of report", y = "Incidence", color = "Sex")+
+    theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2010, 5))
+ggsave("dmfs_inci.png")
+
+```
+
+# By age: Prevalence plot dmf_s/DMF_S (Summed together) - number of individuals with 1 or more surfaces registered as destroyed, misssing or filled at age 5, 9 and 15.
+```{r}
+
+dmfs_filter <- filter(restricted.df, ageatexam == 5 | ageatexam == 9 | ageatexam == 15) #Filtering dataframe for only ages of interest
+
+tmp_age <- dmfs_filter %>% 
+    group_by(indberetningsaar, ageatexam) %>% 
+    summarise(cases_inc = sum(dmfs_bi), 
+              population = sum(n_distinct(pnr))) %>% 
+    mutate(Incidens = 1000 * cases_inc / population) %>% 
+    filter(cases_inc >=5 & indberetningsaar <2010)
+
+tmp_age$ageatexam <- as.factor(tmp_age$ageatexam)
+
+prev.caries <- ggplot(data = tmp_age, aes(x=indberetningsaar, y=Incidens, color = ageatexam))+
+    geom_line()+
+   labs(x = "Year or report", y = "Prevalence", color = "Age")+
+      theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2021, 5))
+ggsave("dmfs_prev.png")
+
+rm(dmfs_filter)
+
+```
+#Binding inci and prev plots in one image
+```{r}
+#Binding all together into one image
+
+ggarrange(gingi.inci, inci.perio, inci.caries,
+          ncol = 1, nrow = 3)
+ggsave("inci.png")
+
+
+ggarrange(gingi.prev, prev.perio, prev.caries, 
+          ncol = 1, nrow = 3)
+ggsave("prev.png")
+
+rm((inci.gingi, prev.caries, inci.perio, prev.perio, inci.caries, prev.caries)
+```
+
+#Comparison individuals DST and SCOR by year of birth 
+
+```{r}
+
+#Download DST excel file
+#dst_births <- read_excel("C:/Users/FNOP707957.DSTFSE.010/Downloads/2022527121813375678117BEV3A.xlsx")
+
+#Clean/format DST file
+dst_births <- select(dst_births, -'Levendefødte og døde efter bevægelse og tid')
+dst_births <- dst_births[-c(1,2,4,5),] 
+rownames(dst_births) = c("n_births_dst")
+colnames(dst_births) = c(
+  "1954","1955","1956","1957","1958",
+  "1959","1960","1961","1962","1963",
+  "1964","1965","1966","1967","1968",
+  "1969","1970","1971","1972","1973", 
+  "1974","1975","1976","1977","1978",
+  "1979","1980","1981","1982","1983",
+  "1984","1985","1986","1987","1988",
+  "1989","1990","1991","1992","1993",
+  "1994","1995","1996","1997","1998",
+  "1999","2000","2001","2002","2003",
+  "2004","2005","2006","2007","2008",
+  "2009","2010","2011","2012","2013",
+  "2014","2015","2016","2017","2018",
+  "2019","2020"
+  )
+dstbirths <- as.data.frame(t(dst_births))
+dstbirths$n_births_dst <- as.numeric(dstbirths$n_births_dst)
+
+#Merge with data on individuals per birth year from SCOR
+SCOR_yearly_births <- data.frame(unclass(table(restricted.df$birth_year)))
+SCOR_yearly_births[SCOR_yearly_births <= 5] <- 0
+write_xlsx(SCOR_yearly_births, "E:\\workdata\\707957\\ID-NN\\Results\\Til hjemsendelse\\yearly births.xlsx")
+
+n_births_comparison <- 
+  merge(dstbirths, SCOR_yearly_births, by=0, all=TRUE)
+
+colnames(n_births_comparison) = c("Year", "n_births_dst", "n_births_SCOR")
+
+n_births_comparison <- n_births_comparison%>%
+  na.omit(n_births_comparison)%>%
+  mutate(difference = n_births_dst - n_births_SCOR)
+
+#Trying without pre-1965 generations
+n_births_comparison <- mutate(n_births_comparison[-c(1:11),])  
+  
+sum(n_births_comparison$n_births_SCOR)
+
+sum(n_births_comparison$difference) # = minus62998
+
+#Calculating dif in percent
+100/sum(n_births_comparison$n_births_dst)*sum(n_births_comparison$difference)
+```
+## Calculating mean/SD entries for presence/abscence periodontitis and gingivitis, and min/max dmfs (based on highest achieved sum(DMF_S+dmf_s at any point in time during eligiblity for SCOR))
+```{r}
+
+#Summarising for average entries by gingivitis
+summary <- summarize(n_entries_per_individual~birth_year+gingivitis, data=df1)
+
+summary$gingivitis <- as.factor(summary$gingivitis)
+summary$birth_year <- as.numeric(summary$birth_year)
+
+
+summary <- summary %>% 
+  filter(birth_year >= 1965 & birth_year <=2010)
+
+#Plotting it
+gingi <- ggplot()+
+  geom_line(data = summary, aes(birth_year, mean, group = gingivitis, color = gingivitis))+
+  labs(x = "Year of birth", y = "Mean entries", color = "Gingivitis")+
+ theme_classic()+
+    scale_x_continuous(breaks = seq(1965, 2010, 5))
+ggsave("gingi_ulighed.png")
+
+
+## For periodontitis coding variable with first entry per individual with periodontitis otherwise just first entry.
+df2 <- df %>% 
+  group_by(pnr) %>% 
+  slice(which.max(perio))
+
+#Summarising for average entries by periodontitis
+summary <- summarize(n_entries_per_individual~birth_year+perio, data=df2)
+
+summary$perio <- as.factor(summary$perio)
+summary$birth_year <- as.numeric(summary$birth_year)
+
+
+summary <- summary %>% 
+  filter(birth_year >= 1965 & birth_year <=2010)
+
+#Plotting it
+perio <- ggplot()+
+  geom_line(data = summary, aes(birth_year, mean, group = perio, color = perio))+
+  labs(x = "Year of birth", y = "Mean entries", color = "Periodontitis")+
+ theme_classic()+
+    scale_x_continuous(breaks = seq(1965, 2010, 5))
+ggsave("perio_ulighed.png")
+
+#Creating df with only one entry per individual by highest dmfs_score
+df3<- df%>%
+  group_by(pnr) %>%
+  slice(which.max(dmfs)) %>% 
+  ungroup
+
+df3$caries[df3$dmfs == 0] <- 0
+df3$caries[df3$dmfs >=1 & df3$dmfs<=20] <- 1
+df3$caries[df3$dmfs >=21 & df3$dmfs <=40] <- 2
+df3$caries[df3$dmfs >=41 & df3$dmfs  >=60] <- 3
+df3$caries[df3$dmfs >=61 & df3$dmfs >=80] <- 4
+df3$caries[df3$dmfs >=81] <- 5
+
+
+#Summarising for average entries by caries level
+
+summary <- summarize(n_entries_per_individual~birth_year+caries, data=df3)
+
+summary$caries <- as.factor(summary$caries)
+summary$birth_year <- as.numeric(summary$birth_year)
+
+summary <- summary %>% 
+  filter(birth_year >= 1965 & birth_year <=2010)
+
+
+#Plotting it
+
+caries <- ggplot()+
+  geom_line(data = summary, aes(birth_year, mean, group = caries, color = caries))+
+    labs(x = "Year of birth", y = "Mean entries", color = "Caries level")+
+ theme_classic()+
+    scale_x_continuous(breaks = seq(1965, 2010, 5))
+ggsave("caries_ulighed.png")
+
+
+#Binding all together into one image
+
+ggarrange(gingi, perio, caries,
+          ncol = 1, nrow = 3)
+ggsave("ulighed.png")
+
+rm(summary)
+
+```
+#T-test of differences between groups, assume no difference between groups (two-sided test, 95 confint, equal variances)
+```{r}
+#Gingivitis
+var.test(n_entries_per_individual~gingivitis, df1) #no sig. dif between variances
+t.test(n_entries_per_individual~gingivitis, data = df1, var.eq = T)
+#t = -205.7, df = 2968329, p-value < 0.00000000000000022, CI -1.270074 -1.246098, mean 8.968864/10.226950 
+
+#Cohen d statistic of difference between two means
+cohen.d(n_entries_per_individual~gingivitis, data = df1)
+
+ #                        lower effect upper
+#n_entries_per_individual  0.34   0.34  0.35
+
+#Periodontitis
+var.test(n_entries_per_individual~perio, df2)  #no sig. dif between variances
+t.test(n_entries_per_individual~perio, data = df2, var.eq = T)
+#t = 0.75452, df = 2968329, p-value = 0.4505, CI  -0.05268767  0.11864479, mean 9.144840/9.111862 
+
+#Cohen d statistic of difference between two means
+cohen.d(n_entries_per_individual~perio, data = df2)
+
+ #                        lower effect upper
+#n_entries_per_individual -0.03  -0.01  0.01
+
+
+#Caries, using caries-free (group 0) as baseline for comparison
+
+df01 <- df3 %>% 
+  filter(caries == 0 | caries == 1)
+t.test(n_entries_per_individual~caries, data = df01)
+#t = -167.9, df = 687307, p-value < 0.00000000000000022,  CI -1.057141 -1.032746, mean 8.336859/9.381802 
+
+#Cohen d statistic of difference between two means
+cohen.d(n_entries_per_individual~caries, data = df01)
+
+#                         lower effect upper
+#n_entries_per_individual  0.28   0.28  0.28
+
+df02 <- df3 %>% 
+  filter(caries == 0 | caries == 2)
+t.test(n_entries_per_individual~caries, data = df02)
+#t = -83.006, df = 882748, p-value < 0.00000000000000022, CI -0.6376309 -0.6082136, mean 8.336859/8.959781 
+
+cohen.d(n_entries_per_individual~caries, data = df02)
+
+#                        lower effect upper
+#n_entries_per_individual  0.17   0.17  0.18
+
+df03 <- df3 %>% 
+  filter(caries == 0 | caries == 3)
+t.test(n_entries_per_individual~caries, data = df03)
+#t = -13.135, df = 5032, p-value < 0.00000000000000022. CI  -0.7261924 -0.5375773, mean  8.336859/8.968744 
+
+cohen.d(n_entries_per_individual~caries, data = df03)
+
+#                         lower effect upper
+#n_entries_per_individual  0.13   0.16  0.19
+
+
+df04 <- df3 %>% 
+  filter(caries == 0 | caries == 4)
+t.test(n_entries_per_individual~caries, data = df04)
+#t = -2.8887, df = 118.07, p-value = 0.004603, CI  -1.5709859 -0.2931117, mean 8.336859/9.268908 
+
+cohen.d(n_entries_per_individual~caries, data = df04)
+
+#                         lower effect upper
+#n_entries_per_individual  0.06   0.24  0.42
+
+
+df05 <- df3 %>% 
+  filter(caries == 0 | caries == 5)
+t.test(n_entries_per_individual~caries, data = df05)
+#t = -8.6478, df = 923.22, p-value < 0.00000000000000022, CI -1.2537325 -0.7899413, mean  8.336859/9.358696
+
+cohen.d(n_entries_per_individual~caries, data = df05)
+
+#                         lower effect upper
+#n_entries_per_individual   0.2   0.26  0.33
+```
+```{r}
+#Entries per individual total and restricted dataset:
+age.res$Dataset[age.res$Freq > 0] <- "Restricted"
+age_total$Dataset[age_total$Freq > 0] <- "Total"
+age.df <- rbind(age.res, age_total) 
+age.df$Dataset <- as.factor(age.df$Dataset)
+
+#plotting it
+age_full_res <- ggplot()+
+    geom_line(data = age.df, aes(x=Var1, y=Freq, group = Dataset, color = Dataset))+
+     xlab("Age")+ ylab("Frequency")+
+    theme_classic()
+ggsave("Age.png")
+```
+## Expected visits
+
+```{r}
+#Making DF for expected enrollment
+
+expected <- data.frame(Year=c(1972, 1973, 1974, 1975, 1976, 1977, 1978, 1979, 1980, 1981, 1982, 1983, 1984, 1985, 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008),
+X1=c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 ,0 , 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X2=c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 ,0 , 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X3=c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 ,0 , 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X4=c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 ,0 , 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X5=c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+X6 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X7=c(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+X8=c(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X9=c(0,0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X10=c(0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X11=c(0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X12=c(0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+X13=c(0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X14=c(0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X15=c(0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+X16=c(0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X17=c(0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+X18=c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+colnames(expected) <- gsub("X","", colnames(expected))
+
+exp <- pivot_longer(
+expected,
+!Year,
+names_to = "Age", 
+values_to = "Freq")
+
+##Plotting it!
+ggplot(expected, aes(fill=Age, y = Freq, x = Year))+
+  geom_bar(position = "stack", stat = "identity")+
+   xlab("Year of report")+ ylab("Frequency")+
+      theme_classic()+
+    scale_x_continuous(breaks = seq(1972, 2008, 5))
+ggsave("enrollment_expected.png")
+
+rm(expected)
+```
